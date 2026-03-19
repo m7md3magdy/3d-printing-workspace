@@ -35,6 +35,9 @@ class ViewerHandler(BaseHTTPRequestHandler):
         elif self.path == "/latest":
             self._serve_latest()
 
+        elif self.path == "/latest-stl":
+            self._serve_latest_stl()
+
         elif self.path.startswith("/previews/"):
             fname = self.path[len("/previews/"):]
             fpath = PREVIEWS_DIR / fname
@@ -75,6 +78,48 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 "url":  f"/previews/{latest.name}",
                 "mtime": latest.stat().st_mtime,
                 "data": f"data:image/png;base64,{b64}",
+            }).encode()
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(payload)
+
+
+    def _serve_latest_stl(self):
+        import base64
+        stls = sorted(
+            (WORKSPACE / "exports").glob("*.stl"),
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
+        if not stls:
+            payload = json.dumps({"file": None}).encode()
+        else:
+            latest = stls[0]
+            stl_bytes = latest.read_bytes()
+            b64 = base64.b64encode(stl_bytes).decode("ascii")
+            # Rough volume estimate via numpy-stl (optional, best-effort)
+            volume_cm3 = None
+            try:
+                from stl import mesh as stl_mesh
+                import numpy as np
+                m = stl_mesh.Mesh.from_file(str(latest))
+                # Signed volume via divergence theorem
+                v0, v1, v2 = m.v0, m.v1, m.v2
+                vol = abs(np.sum(np.cross(v0, v1) * v2) / 6.0)
+                volume_cm3 = round(float(vol) / 1000, 2)
+            except Exception:
+                pass
+            payload = json.dumps({
+                "file":       latest.name,
+                "mtime":      latest.stat().st_mtime,
+                "size_bytes": len(stl_bytes),
+                "volume_cm3": volume_cm3,
+                "stl_b64":    b64,
             }).encode()
 
         self.send_response(200)
