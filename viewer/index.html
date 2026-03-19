@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Part Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  #header {
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  #header h1 { font-size: 14px; font-weight: 600; color: #58a6ff; }
+  #status {
+    font-size: 11px;
+    color: #8b949e;
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #3fb950;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  #img-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    padding: 12px;
+  }
+  #preview-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: 6px;
+    border: 1px solid #21262d;
+    transition: opacity 0.2s;
+  }
+  #preview-img.loading { opacity: 0.5; }
+  #info-bar {
+    background: #161b22;
+    border-top: 1px solid #30363d;
+    padding: 6px 16px;
+    font-size: 11px;
+    color: #8b949e;
+    display: flex;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+  #info-bar span { color: #e6edf3; }
+  #no-img {
+    text-align: center;
+    color: #484f58;
+    display: none;
+  }
+  #no-img h2 { font-size: 18px; margin-bottom: 8px; }
+  #no-img p { font-size: 13px; }
+  .badge {
+    background: #1f6feb33;
+    color: #58a6ff;
+    border: 1px solid #1f6feb66;
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>3D Print Viewer</h1>
+  <span class="badge" id="part-name">—</span>
+  <div id="status">
+    <div id="dot"></div>
+    <span id="status-text">watching for updates…</span>
+  </div>
+</div>
+
+<div id="img-container">
+  <div id="no-img">
+    <h2>No preview yet</h2>
+    <p>Run <code>preview.py</code> to generate one</p>
+  </div>
+  <img id="preview-img" src="" alt="Part preview" style="display:none" />
+</div>
+
+<div id="info-bar">
+  Part: <span id="ib-part">—</span>
+  &nbsp;|&nbsp; Updated: <span id="ib-time">—</span>
+  &nbsp;|&nbsp; Auto-refresh: <span id="ib-interval">every 2s</span>
+</div>
+
+<script>
+  const PREVIEWS_PATH = '/previews/';
+  const POLL_MS = 2000;
+
+  // Try to load a list of previews via the /list endpoint, fallback to fixed name
+  let knownFiles = [];
+  let lastSrc = '';
+  let lastMod = '';
+
+  async function fetchWithCache(url) {
+    // append cache-buster so browser doesn't cache the image
+    return url + '?t=' + Date.now();
+  }
+
+  async function checkForLatest() {
+    try {
+      // Ask server for list of previews sorted by mtime
+      const res = await fetch('/latest');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.file) return;
+
+      const imgUrl = await fetchWithCache(data.url);
+      const img = document.getElementById('preview-img');
+      const noImg = document.getElementById('no-img');
+
+      if (data.file !== lastSrc || data.mtime !== lastMod) {
+        img.classList.add('loading');
+        // Image data is embedded as base64 in the /latest response — no extra request needed
+        img.onload = () => {
+          img.classList.remove('loading');
+          img.style.display = 'block';
+          noImg.style.display = 'none';
+          lastSrc = data.file;
+          lastMod = data.mtime;
+          document.getElementById('part-name').textContent = data.file.replace('_preview.png','').replace(/_/g,' ');
+          document.getElementById('ib-part').textContent = data.file;
+          document.getElementById('ib-time').textContent = new Date(data.mtime * 1000).toLocaleTimeString();
+          document.getElementById('status-text').textContent = 'live — last update ' + new Date().toLocaleTimeString();
+        };
+        img.src = data.data;
+      }
+    } catch(e) {
+      document.getElementById('status-text').textContent = 'server not reachable';
+      document.getElementById('dot').style.background = '#f85149';
+    }
+  }
+
+  checkForLatest();
+  setInterval(checkForLatest, POLL_MS);
+</script>
+</body>
+</html>
